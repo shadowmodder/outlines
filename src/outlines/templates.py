@@ -298,7 +298,7 @@ def get_schema_pydantic(model: Type[BaseModel]):
     return json.dumps(schema, indent=2)
 
 
-def parse_pydantic_schema(raw_schema, definitions):
+def parse_pydantic_schema(raw_schema, definitions, _seen_refs=None):
     """Parse the output of `Basemodel.[schema|model_json_schema]()`.
 
     This recursively follows the references to other schemas in case
@@ -306,25 +306,37 @@ def parse_pydantic_schema(raw_schema, definitions):
     key in the schema of the top-level model.
 
     """
+    if _seen_refs is None:
+        _seen_refs = ()
     if "properties" not in raw_schema:
         return parse_pydantic_schema_value(
-            raw_schema.get("title", "value"), raw_schema, definitions
+            raw_schema.get("title", "value"), raw_schema, definitions, _seen_refs
         )
 
     simple_schema = {}
     for name, value in raw_schema["properties"].items():
-        simple_schema[name] = parse_pydantic_schema_value(name, value, definitions)
+        simple_schema[name] = parse_pydantic_schema_value(
+            name, value, definitions, _seen_refs
+        )
 
     return simple_schema
 
 
-def parse_pydantic_schema_value(name, schema, definitions):
+def parse_pydantic_schema_value(name, schema, definitions, _seen_refs=None):
     """Render a single Pydantic schema property for prompt examples."""
+    if _seen_refs is None:
+        _seen_refs = ()
     if "description" in schema:
         return schema["description"]
     elif "$ref" in schema:
-        refs = schema["$ref"].split("/")
-        return parse_pydantic_schema(definitions[refs[2]], definitions)
+        ref_name = schema["$ref"].split("/")[-1]
+        if ref_name in _seen_refs:
+            # Recursive (cyclic) model reference: render the referenced model
+            # name instead of recursing forever.
+            return f"<{ref_name}>"
+        return parse_pydantic_schema(
+            definitions[ref_name], definitions, _seen_refs + (ref_name,)
+        )
     elif "enum" in schema:
         values = " | ".join(str(value) for value in schema["enum"])
         return f"<{values}>"
@@ -338,7 +350,9 @@ def parse_pydantic_schema_value(name, schema, definitions):
             member for member in schema["anyOf"] if member.get("type") != "null"
         ]
         if len(non_null) == 1:
-            return parse_pydantic_schema_value(name, non_null[0], definitions)
+            return parse_pydantic_schema_value(
+                name, non_null[0], definitions, _seen_refs
+            )
         return f"<{name}>"
     else:
         return f"<{name}>"

@@ -74,6 +74,11 @@ class PydanticUnionClass(BaseModel):
     equipment: Union[Armor, Weapon]
 
 
+class PydanticRecursiveClass(BaseModel):
+    value: int
+    child: Optional["PydanticRecursiveClass"] = None
+
+
 def test_vision_initialization():
     # Create a simple image for testing
     image = PILImage.new("RGB", (10, 10), color="red")
@@ -430,6 +435,15 @@ def test_get_schema():
     assert (
         pydantic_union_schema_output
         == '{\n  "name": "<name>",\n  "equipment": "<equipment>"\n}'
+    )
+
+    # Recursive models must terminate: the cyclic reference renders as a
+    # placeholder with the referenced model's name instead of recursing
+    # forever (previously raised RecursionError).
+    pydantic_recursive_schema_output = get_schema(PydanticRecursiveClass)
+    assert (
+        pydantic_recursive_schema_output
+        == '{\n  "value": "<value>",\n  "child": "<PydanticRecursiveClass>"\n}'
     )
 
 
